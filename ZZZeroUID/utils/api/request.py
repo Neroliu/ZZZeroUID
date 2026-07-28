@@ -83,8 +83,8 @@ class ZZZApi(_MysApi):
     async def zzz_get_ck(self, uid: str, mode: Literal["OWNER", "RANDOM"] = "RANDOM") -> Optional[str]:
         return await self.get_ck(uid, mode, "zzz")
 
-    async def get_stoken(self, uid: str) -> Optional[str]:
-        return await GsUser.get_user_stoken_by_uid(uid, game_name="zzz")
+    async def get_stoken(self, uid: str, game_name: Optional[str] = "zzz") -> Optional[str]:
+        return await GsUser.get_user_stoken_by_uid(uid, game_name=game_name or "zzz")
 
     @overload
     async def get_zzz_ann(
@@ -130,6 +130,7 @@ class ZZZApi(_MysApi):
             f"{ANN_API}/{_type}",
             "GET",
             params=params,
+            game_name="zzz",
         )
         if isinstance(data, Dict) and _type == "getAnnList":
             data = cast(ZZZAnnData, data["data"])
@@ -170,6 +171,7 @@ class ZZZApi(_MysApi):
             ZZZ_GAME_INFO_API,
             header=header,
             base_url=base_url,
+            game_name="zzz",
         )
         if isinstance(data, Dict):
             for i in data["data"]["list"]:
@@ -394,6 +396,7 @@ class ZZZApi(_MysApi):
                 "size": "20",
                 "end_id": end_id,
             },
+            game_name="zzz",
         )
         if isinstance(data, Dict):
             data = cast(ZZZGachaLogResp, data["data"])
@@ -417,6 +420,7 @@ class ZZZApi(_MysApi):
                 "gacha_type": gacha_type,
                 "init_log_gacha_type": gacha_type,
             },
+            game_name="zzz",
         )
         if isinstance(data, Dict):
             data = cast(ZZZGachaLogResp, data["data"])
