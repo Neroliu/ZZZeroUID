@@ -83,6 +83,7 @@ camp_map = {
     "坎卜斯黑枝": "BlackRoot",
     "妄想天使": "A.O.D",
     "罗斯凯利法·外务筹策局": "E.S.D.",
+    "达识结社": "FactionCovenantOfDayat",
 }
 
 
