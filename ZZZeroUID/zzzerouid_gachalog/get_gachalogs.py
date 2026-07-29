@@ -39,6 +39,7 @@ async def get_new_gachalog(uid: str, full_data: Dict, is_force: bool):
                 uid,
                 "nap_cn",
                 server_id,
+                "zzz",
             )
             if isinstance(authkey_rawdata, int):
                 return authkey_rawdata

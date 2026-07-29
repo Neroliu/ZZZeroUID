@@ -748,10 +748,10 @@
             34145,
             34146
         ],
-        "sprite_file": "3D",
-        "equip_name": "(Test1)新驱动盘1",
-        "desc1": "攻击力+10%。",
-        "desc2": "(Test1)新驱动盘4件套1"
+        "sprite_file": "3DSuitFeatheredFate",
+        "equip_name": "谶羽之誓",
+        "desc1": "异常精通+30点。",
+        "desc2": "装备者进入战场时，或被切换为当前操作中角色时，获得增益效果：异常精通提升50点，若装备者为<color=#FFA9DD>流明属性</color>，造成的属性异常伤害提升15%，持续15秒；\n当装备者为非操作中角色时，则始终持有该增益效果。"
     },
     "34200": {
         "equip_id_list": [
@@ -774,9 +774,9 @@
             34245,
             34246
         ],
-        "sprite_file": "3D",
-        "equip_name": "(Test1)新驱动盘2",
+        "sprite_file": "3DSuitThornedRose",
+        "equip_name": "荆棘玫瑰",
         "desc1": "防御力+16%。",
-        "desc2": "(Test1)新驱动盘4件套2"
+        "desc2": "装备者造成的伤害提升15%，装备者初始防御力大于等于1000/1800点时，暴击率提升8/16%"
     }
 }

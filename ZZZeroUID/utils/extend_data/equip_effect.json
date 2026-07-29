@@ -1,4 +1,24 @@
 {
+    "谶羽之誓": {
+        "normal_effect": {
+            "desc1": "ElementMystery+30",
+            "desc2": ""
+        },
+        "skill_effect": {
+            "desc1": "",
+            "desc2": "ElementMystery+50;DmgBonus+1500"
+        }
+    },
+    "荆棘玫瑰": {
+        "normal_effect": {
+            "desc1": "DefenceAdd+1600",
+            "desc2": ""
+        },
+        "skill_effect": {
+            "desc1": "",
+            "desc2": "DmgBonus+1500;crit+1600"
+        }
+    },
     "呼啸沙龙": {
         "normal_effect": {
             "desc1": "WindDmgBonus+1000",

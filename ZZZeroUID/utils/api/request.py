@@ -83,8 +83,9 @@ class ZZZApi(_MysApi):
     async def zzz_get_ck(self, uid: str, mode: Literal["OWNER", "RANDOM"] = "RANDOM") -> Optional[str]:
         return await self.get_ck(uid, mode, "zzz")
 
-    async def get_stoken(self, uid: str, game_name: Optional[str] = "zzz") -> Optional[str]:
-        return await GsUser.get_user_stoken_by_uid(uid, game_name=game_name or "zzz")
+    async def get_stoken(self, uid: str, game_name: Optional[str] = None) -> Optional[str]:
+        # 兼容父类 get_authkey_by_cookie(uid, "gs") 等调用；ZZZ 固定查 zzz stoken
+        return await GsUser.get_user_stoken_by_uid(uid, game_name="zzz")
 
     @overload
     async def get_zzz_ann(

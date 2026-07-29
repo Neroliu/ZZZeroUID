@@ -1,4 +1,36 @@
 {
+    "空羽复归之诗": {
+        "normal_effect": {
+            "1": "ElementMystery+96",
+            "2": "ElementMystery+105",
+            "3": "ElementMystery+115",
+            "4": "ElementMystery+125",
+            "5": "ElementMystery+135`"
+        },
+        "skill_effect": {
+            "1": "DmgBonus+3000",
+            "2": "DmgBonus+3450",
+            "3": "DmgBonus+3900",
+            "4": "DmgBonus+4300",
+            "5": "DmgBonus+4800"
+        }
+    },
+    "骁骑礼赞": {
+        "normal_effect": {
+            "1": "",
+            "2": "",
+            "3": "",
+            "4": "",
+            "5": ""
+        },
+        "skill_effect": {
+            "1": "crit+6400",
+            "2": "crit+7360",
+            "3": "crit+8320",
+            "4": "crit+9280",
+            "5": "crit+10240"
+        }
+    },
     "日冕遗蜕": {
         "normal_effect": {
             "1": "crit+2000",
