@@ -1,4 +1,3 @@
-from typing import Union
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -16,6 +15,8 @@ from ..utils.image import (
     get_player_card_min,
 )
 from ..utils.api.models import (
+    MEMBuddy,
+    MEMAvatar,
     ZZZBangboo,
     ZZZAvatarBasic,
     ChallengeAvatar,
@@ -29,7 +30,7 @@ from ..utils.resource.download_file import (
 )
 
 TEXT_PATH = Path(__file__).parent / "texture2d"
-RANK_COLOR_MAP = {
+RANK_COLOR_MAP: dict[int, tuple[int, int, int]] = {
     0: (131, 132, 131),
     1: (26, 122, 26),
     2: (1, 139, 222),
@@ -38,11 +39,14 @@ RANK_COLOR_MAP = {
     5: (249, 81, 0),
     6: (249, 0, 0),
 }
+DEFAULT_RANK_COLOR = (131, 132, 131)
 char_fg = Image.open(TEXT_PATH / "char_fg.png")
 bangboo_fg = Image.open(TEXT_PATH / "bangboo_fg.png")
 
 
-async def draw_bangboo(bangboo: Union[ChallengeBangboo, ZZZBangboo]):
+async def draw_bangboo(
+    bangboo: ChallengeBangboo | ZZZBangboo | MEMBuddy,
+) -> Image.Image:
     rarity = bangboo["rarity"]
     rank_icon = get_rank_img(rarity)
     rank_bg = Image.open(TEXT_PATH / f"{rarity}RANK_BG.png")
@@ -61,7 +65,9 @@ async def draw_bangboo(bangboo: Union[ChallengeBangboo, ZZZBangboo]):
     return rank_bg
 
 
-async def draw_avatar(agent: Union[ZZZAvatarBasic, ChallengeAvatar]):
+async def draw_avatar(
+    agent: ZZZAvatarBasic | ChallengeAvatar | MEMAvatar,
+) -> Image.Image:
     rarity = agent["rarity"]
     rank_icon = get_rank_img(rarity)
     element_icon = get_element_img(agent["element_type"])
@@ -74,7 +80,10 @@ async def draw_avatar(agent: Union[ZZZAvatarBasic, ChallengeAvatar]):
     rank_bg.paste(element_icon, (130, 21), element_icon)
     if "rank" in agent:
         rank = agent["rank"]
-        rank_color = RANK_COLOR_MAP.get(rank, (131, 132, 131))
+        if rank in RANK_COLOR_MAP:
+            rank_color = RANK_COLOR_MAP[rank]
+        else:
+            rank_color = DEFAULT_RANK_COLOR
         rank_draw.rectangle((19, 165, 76, 202), rank_color)
         rank_draw.text(
             (48, 184),
@@ -96,7 +105,7 @@ async def draw_avatar(agent: Union[ZZZAvatarBasic, ChallengeAvatar]):
     return rank_bg
 
 
-async def draw_role_img(uid: str, ev: Event) -> Union[str, bytes]:
+async def draw_role_img(uid: str, ev: Event) -> str | bytes:
     data = await zzz_api.get_zzz_index_info(uid)
     if isinstance(data, int):
         return error_reply(data)

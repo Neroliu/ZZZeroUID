@@ -507,13 +507,15 @@ class ListItem(TypedDict):
     score: int
     boss: List[Boss]
     buffer: List[Buffer]
-    buddy: Buddy
+    buddy: MEMBuddy
     total_star: int
     challenge_time: TimeData
-    avatar_list: List[Avatar]
+    avatar_list: List[MEMAvatar]
 
 
 class ZZZMEMInfo(TypedDict):
+    """危局强袭战 hadal_mem_detail_v2 响应"""
+
     end_time: TimeData
     nick_name: str
     avatar_icon: str
@@ -524,6 +526,11 @@ class ZZZMEMInfo(TypedDict):
     rank_percent: int
     list: List[ListItem]
     total_score: int
+    total_max_score: int
+    room_max_score: int
+    has_hard: bool
+    hard_list: List[ListItem]
+    hard_rank_percent: int
 
 
 # =================================================

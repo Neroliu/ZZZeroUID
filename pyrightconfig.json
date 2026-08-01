@@ -1,0 +1,18 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "venvPath": "F:/gsuid_core",
+  "venv": ".venv",
+  "extraPaths": [
+    "F:/gsuid_core",
+    "."
+  ],
+  "include": ["ZZZeroUID"],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "ZZZeroUID/tools"
+  ],
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false
+}

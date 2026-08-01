@@ -1,4 +1,3 @@
-from typing import Union
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -16,7 +15,7 @@ from ..utils.image import (
     get_zzz_bg,
     get_player_card_min,
 )
-from ..utils.api.models import Boss
+from ..utils.api.models import Boss, ListItem
 from ..utils.zzzero_api import zzz_api
 from ..utils.fonts.zzz_fonts import (
     zzz_font_38,
@@ -31,10 +30,13 @@ TEXT_PATH = Path(__file__).parent / "texture2d"
 boss_mask = Image.open(TEXT_PATH / "monster_mask.png")
 boss_fg = Image.open(TEXT_PATH / "monster_fg.png")
 
+CARD_HEIGHT = 420
+HARD_SECTION_GAP = 120
 
-def get_rank_tier(percent: Union[int, float]):
+
+def get_rank_tier(percent: int | float) -> Image.Image:
     rank_percent = percent
-    color = BLACK_G
+    color: tuple[int, int, int] | str = BLACK_G
     if rank_percent <= 1:
         rank_tag = "tier_5"
     elif rank_percent <= 10:
@@ -61,7 +63,7 @@ def get_rank_tier(percent: Union[int, float]):
     return rank_img
 
 
-async def draw_boss(boss: Boss):
+async def draw_boss(boss: Boss) -> Image.Image:
     boss_card = Image.new("RGBA", (241, 333))
 
     boss_name = boss["name"]
@@ -100,25 +102,93 @@ async def draw_boss(boss: Boss):
     return boss_card
 
 
-async def draw_mem_img(uid: str, ev: Event, schedule_type: int):
+async def draw_mem_card(mem: ListItem) -> Image.Image:
+    card = Image.open(TEXT_PATH / "card_bg.png")
+    card_draw = ImageDraw.Draw(card)
+
+    star_full = Image.open(TEXT_PATH / "star_full.png")
+    star_empty = Image.open(TEXT_PATH / "star_empty.png")
+
+    _time = mem["challenge_time"]
+    time_str1 = f"{_time['year']}.{_time['month']}.{_time['day']}"
+    time_str2 = f"{_time['hour']}:{_time['minute']}:{_time['second']}"
+    time_str = f"通关时刻 {time_str1} {time_str2}"
+
+    boss_img = await draw_boss(mem["boss"][0])
+    card.paste(boss_img, (62, 51), boss_img)
+
+    card_draw.text(
+        (333, 91),
+        mem["boss"][0]["name"],
+        font=zzz_font_54,
+        fill=YELLOW,
+        anchor="lm",
+    )
+    card_draw.text(
+        (333, 155),
+        f"{mem['score']}",
+        font=zzz_font_50,
+        fill="white",
+        anchor="lm",
+    )
+    card_draw.text(
+        (333, 202),
+        time_str,
+        font=zzz_font_thin(20),
+        fill=GREY,
+        anchor="lm",
+    )
+
+    mem_star = mem["star"]
+    for j in range(3):
+        star_img = star_full if j < mem_star else star_empty
+        card.paste(star_img, (515 + j * 30, 133), star_img)
+
+    if mem["buffer"]:
+        buff = mem["buffer"][0]
+        buff_icon = buff["icon"]
+        buff_name = buff_icon.split("/")[-1]
+        buff_path = TEMP_PATH / buff_name
+        if not buff_path.exists():
+            await download(buff_icon, TEMP_PATH, buff_name)
+        buff_img = Image.open(buff_path).resize((78, 78))
+        card.paste(buff_img, (851, 13), buff_img)
+
+    for aindex, agent in enumerate(mem["avatar_list"]):
+        avatar_img = await draw_avatar(agent)
+        avatar_img = avatar_img.resize((152, 176))
+        card.paste(avatar_img, (320 + aindex * 146, 221), avatar_img)
+
+    bangboo_img = await draw_bangboo(mem["buddy"])
+    bangboo_img = bangboo_img.resize((123, 143))
+    card.paste(bangboo_img, (770, 251), bangboo_img)
+
+    return card
+
+
+async def draw_mem_img(uid: str, ev: Event, schedule_type: int) -> str | bytes:
     data = await zzz_api.get_zzz_mem_info(uid, schedule_type)
     if isinstance(data, int):
         return error_reply(data)
 
-    if not data["list"]:
+    normal_list = data["list"]
+    hard_list = data["hard_list"] if data["has_hard"] else []
+
+    if not data["has_data"] or (not normal_list and not hard_list):
         return "你还没有挑战本期【危局强袭战】/或数据未刷新!\n可尝试使用【上期强袭战】查询上期战绩！"
 
     player_card = await get_player_card_min(uid, ev)
     if isinstance(player_card, int):
         return error_reply(player_card)
 
-    w, h = 950, 730 + 420 * len(data["list"])
+    w = 950
+    h = 730 + CARD_HEIGHT * len(normal_list)
+    if hard_list:
+        h += HARD_SECTION_GAP + CARD_HEIGHT * len(hard_list)
 
-    rank_percent = data["rank_percent"] / 100
-    rank_img = get_rank_tier(rank_percent)
-
-    all_score = sum([i["score"] for i in data["list"]])
-    all_star = sum([i["star"] for i in data["list"]])
+    rank_img = get_rank_tier(data["rank_percent"] / 100)
+    all_score = data["total_score"]
+    all_star = data["total_star"]
 
     img = get_zzz_bg(w, h, "bg4")
     title = Image.open(TEXT_PATH / "title.png")
@@ -149,88 +219,55 @@ async def draw_mem_img(uid: str, ev: Event, schedule_type: int):
     img.paste(player_card, (0, 330), player_card)
     img.paste(banner, (0, 552), banner)
 
-    star_full = Image.open(TEXT_PATH / "star_full.png")
-    star_empty = Image.open(TEXT_PATH / "star_empty.png")
+    y_offset = 660
+    for mem in normal_list:
+        card = await draw_mem_card(mem)
+        img.paste(card, (0, y_offset), card)
+        y_offset += CARD_HEIGHT
 
-    for i, mem in enumerate(data["list"]):
-        card = Image.open(TEXT_PATH / "card_bg.png")
-        card_draw = ImageDraw.Draw(card)
+    if hard_list:
+        hard_banner = Image.new("RGBA", (950, HARD_SECTION_GAP), (0, 0, 0, 0))
+        hard_draw = ImageDraw.Draw(hard_banner)
 
-        _time = mem["challenge_time"]
-        time_str1 = f"{_time['year']}.{_time['month']}.{_time['day']}"
-        time_str2 = f"{_time['hour']}:{_time['minute']}:{_time['second']}"
-        time_str = f"通关时刻 {time_str1} {time_str2}"
-
-        boss_img = await draw_boss(mem["boss"][0])
-        card.paste(boss_img, (62, 51), boss_img)
-
-        card_draw.text(
-            (333, 91),
-            mem["boss"][0]["name"],
-            font=zzz_font_54,
+        hard_draw.text(
+            (80, 55),
+            "绝境难度",
+            font=zzz_font_50,
             fill=YELLOW,
             anchor="lm",
+            stroke_width=2,
+            stroke_fill="black",
         )
-        card_draw.text(
-            (333, 155),
-            f"{mem['score']}",
-            font=zzz_font_50,
+
+        hard_score = sum(i["score"] for i in hard_list)
+        hard_star = sum(i["star"] for i in hard_list)
+        hard_draw.text(
+            (320, 55),
+            f"{hard_score}",
+            font=zzz_font_38,
+            fill="white",
+            anchor="lm",
+            stroke_width=2,
+            stroke_fill="black",
+        )
+        hard_draw.text(
+            (480, 55),
+            f"★x{hard_star}",
+            font=zzz_font_38,
             fill="white",
             anchor="lm",
         )
-        card_draw.text(
-            (333, 202),
-            time_str,
-            font=zzz_font_thin(20),
-            fill=GREY,
-            anchor="lm",
-        )
 
-        mem_star = mem["star"]
+        hard_rank_img = get_rank_tier(data["hard_rank_percent"] / 100)
+        hard_banner.paste(hard_rank_img, (620, 10), hard_rank_img)
 
-        for j in range(3):
-            if j < mem_star:
-                card.paste(
-                    star_full,
-                    (515 + j * 30, 133),
-                    star_full,
-                )
-            else:
-                card.paste(
-                    star_empty,
-                    (515 + j * 30, 133),
-                    star_empty,
-                )
+        img.paste(hard_banner, (0, y_offset), hard_banner)
+        y_offset += HARD_SECTION_GAP
 
-        buff = mem["buffer"][0]
-        buff_icon = buff["icon"]
-        buff_name = buff_icon.split("/")[-1]
-        buff_path = TEMP_PATH / buff_name
-        if not buff_path.exists():
-            await download(buff_icon, TEMP_PATH, buff_name)
-        buff_img = Image.open(buff_path).resize((78, 78))
-        card.paste(buff_img, (851, 13), buff_img)
-
-        for aindex, agent in enumerate(mem["avatar_list"]):
-            avatar_img = await draw_avatar(agent)
-            avatar_img = avatar_img.resize((152, 176))
-            card.paste(
-                avatar_img,
-                (320 + aindex * 146, 221),
-                avatar_img,
-            )
-
-        if "buddy" in mem:
-            bangboo_img = await draw_bangboo(mem["buddy"])
-            bangboo_img = bangboo_img.resize((123, 143))
-            card.paste(
-                bangboo_img,
-                (770, 251),
-                bangboo_img,
-            )
-
-        img.paste(card, (0, 660 + i * 420), card)
+        for mem in hard_list:
+            card = await draw_mem_card(mem)
+            img.paste(card, (0, y_offset), card)
+            y_offset += CARD_HEIGHT
 
     img = add_footer(img)
-    res = await convert_img(img)
-    return res
+    return await convert_img(img)

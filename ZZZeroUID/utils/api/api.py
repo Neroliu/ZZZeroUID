@@ -18,7 +18,7 @@ ZZZ_HADAL_API = "/hadal_info_v2"
 ZZZ_NOTE_WIDGET_API = "/widget"
 
 ZZZ_MONTH_INFO = "/month_info"
-ZZZ_MEM = "/mem_detail"
+ZZZ_MEM = "/hadal_mem_detail_v2"
 
 ZZZ_VOID_BATTLE_API = "/void_front_battle_detail"
 

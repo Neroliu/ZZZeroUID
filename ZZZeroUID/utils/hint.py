@@ -7,7 +7,6 @@ prefix = get_plugin_available_prefix("ZZZeroUID")
 BIND_UID_HINT = f"你还没有绑定UID哦, 请使用 {prefix}绑定uid 完成绑定！"
 
 ZZZ_ERROR_CODE = deepcopy(ERROR_CODE)
-ZZZ_ERROR_CODE.update()
 
 
 def error_reply(retcode: int, msg: str = "") -> str:
