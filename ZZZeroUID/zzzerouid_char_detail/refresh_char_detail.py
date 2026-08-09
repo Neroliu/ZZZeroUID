@@ -19,7 +19,10 @@ from ..utils.api.models import ZZZAvatarInfo
 from ..utils.zzzero_api import zzz_api
 from ..utils.enka_to_mys import _enka_data_to_mys_data
 from .draw_char_detail_card import TEXT_PATH
-from .official_score import process_avatars_on_refresh
+from .official_score import (
+    process_avatars_on_refresh,
+    supplement_official_score_from_mys,
+)
 from ..utils.fonts.zzz_fonts import zzz_font_40
 from ..utils.resource.RESOURCE_PATH import PLAYER_PATH
 from ..zzzerouid_config.zzzero_config import ZZZ_CONFIG
@@ -84,11 +87,15 @@ async def refresh_char(
     now = datetime.now()
     current_time = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # MYS：写入官方评分规则缓存；Enka/MiniGG：用缓存回算 valid/命中
+    # 1) 基础处理：MYS 写规则缓存；Enka 尝试用已有规则回算
     processed = process_avatars_on_refresh(
         [dict(a) if isinstance(a, dict) else a for a in data],
         source=source if source == "MYS" else "ENKA",
     )
+
+    # 2) 关键：无论刷新源是谁，有主人 Cookie 就拉 MYS 官方评分写入本地
+    #    （默认顺序 ENKA 优先且出图后直接 return，原本永远走不到 MYS）
+    processed = await supplement_official_score_from_mys(uid, processed)
 
     path = PLAYER_PATH / str(uid)
     path.mkdir(parents=True, exist_ok=True)
@@ -99,6 +106,9 @@ async def refresh_char(
         _id = avatar["id"]
         save_data["uid"] = uid
         save_data["current_time"] = current_time
+        # 内部标记不落盘
+        save_data.pop("_official_score_applied", None)
+        save_data.pop("_score_merged_from_mys", None)
 
         with open(path / f"{_id}.json", "wb") as f:
             d = json.dumps(

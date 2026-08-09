@@ -36,7 +36,11 @@ from ..utils.image import (
     get_mind_role_img,
     get_player_card_min,
 )
-from .official_score import ensure_official_score
+from .official_score import (
+    ensure_official_score,
+    has_official_mys_plan,
+    supplement_official_score_from_mys,
+)
 from ..utils.name_convert import char_name_to_char_id
 from ..utils.fonts.zzz_fonts import (
     zzz_font_28,
@@ -140,13 +144,35 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
         data = json.loads(await f.read())
 
-    # 旧本地数据 / Enka：补齐评分字段
+    # 1) 本地规则缓存回算（无 Cookie 也能用别人刷过的规则）
     data = ensure_official_score(data)
-    if data.pop("_official_score_applied", False):
-        # 回写本地，避免每次查询重复兼容逻辑
+
+    # 2) 本地仍无 MYS 官方 plan → 查询时拉一次 MYS 补分并写回缓存
+    #    （解决：刷新走 ENKA 优先、从未落盘 equip_plan_info）
+    if not has_official_mys_plan(data):
+        patched = await supplement_official_score_from_mys(uid, [data])
+        if patched:
+            data = patched[0]
+
+    need_save = bool(
+        data.pop("_official_score_applied", False)
+        or data.pop("_score_merged_from_mys", False)
+    )
+    if need_save:
         try:
+            # 去掉仅内存标记；equip_plan_info 整段保留
+            save_data = {
+                k: v
+                for k, v in data.items()
+                if k
+                not in (
+                    "_official_score_applied",
+                    "_score_merged_from_mys",
+                )
+            }
             async with aiofiles.open(path, "w", encoding="utf-8") as f:
-                await f.write(json.dumps(data, ensure_ascii=False, indent=4))
+                await f.write(json.dumps(save_data, ensure_ascii=False, indent=4))
+            data = save_data
         except Exception:
             pass
 

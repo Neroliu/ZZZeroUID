@@ -35,22 +35,22 @@ Enka / MiniGG **不提供** `equip_plan_info` 与真实 `valid`；更早的本�
 
 插件策略：
 
-1. **任意用户**用 **MYS** 刷新某角色 → 将该角色的「有效副属性规则」写入全局缓存：  
-   `{资源目录}/ZZZeroUID/official_equip_plan.json`  
-   （只缓存规则，不缓存某玩家的命中数/评级。）
+1. **刷新面板（任意数据源 ENKA/MINIGG/MYS）落盘前**  
+   若该 UID 绑定了**主人 Cookie**，会额外请求 MYS `avatar/info`，把  
+   `equip_plan_info` + 官方 `equip`（含 `valid` / 未命中 / 评级）**合并进本地 JSON**。  
+   这样即使默认顺序是 `ENKA → …` 且出图后提前返回，本地缓存里也会有官方分。
 
-2. **Enka 刷新 / 查询旧存档**时调用 `ensure_official_score`：  
-   - 已有完整 `equip_plan_info`（旧 MYS 存档）：写缓存，必要时补 `valid` / 未命中  
-   - 盘上已有 `valid=true`（残缺 plan）：按词条回算命中并合成简易 plan  
-   - 否则用全局规则缓存回算：  
-     - `valid`：`property_id ∈ plan_effective_property_list`  
-     - 命中：`sum(level where valid)`  
-     - 未命中：`sum(add where not valid)`  
-   - 回算成功会**写回**该角色本地 JSON，避免每次查询重复兼容  
+2. **全局规则缓存**（`{资源目录}/ZZZeroUID/official_equip_plan.json`）  
+   任意账号 MYS 成功补分后，按角色 ID 写入有效词条规则，供无 Cookie 的 Enka 回算。
 
-3. 本地回算**不伪造** `equip_rating`（服务端算法未公开）；展示命中次数 + 词条有效性，并标注来源。
+3. **查询面板**（读本地 JSON 渲染）  
+   - 先 `ensure_official_score`（规则缓存回算）  
+   - 若仍无 MYS 原装 plan → **再拉一次**该角色 MYS 补分并写回本地  
+   - 然后用缓存数据画图  
 
-4. 无规则且无缓存时：分数显示 `--`，不把 Enka 的全 `valid=false` 当成废词条灰显。
+4. 无 Cookie 且无全局规则时：分数 `--`，不把 Enka 全 `valid=false` 当废词条。
+
+> 注意：官方分依赖米游社 Cookie。只绑 UID、刷新只走 Enka 且没有 Cookie 时，无法出现官方命中/评级。
 
 实现文件：
 

@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 import threading
 from copy import deepcopy
+from typing import Any, Dict, List, Optional, Set, cast
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
 
 from gsuid_core.logger import logger
 
@@ -50,9 +50,7 @@ def _load_cache() -> Dict[str, Any]:
         if not isinstance(_cache_mem, dict):
             _cache_mem = {}
         if "plans" not in _cache_mem:
-            if _cache_mem and all(
-                str(k).isdigit() for k in _cache_mem.keys() if not str(k).startswith("_")
-            ):
+            if _cache_mem and all(str(k).isdigit() for k in _cache_mem.keys() if not str(k).startswith("_")):
                 _cache_mem = {"version": 1, "plans": _cache_mem}
             else:
                 _cache_mem = {"version": 1, "plans": dict(_cache_mem.get("plans") or {})}
@@ -76,9 +74,7 @@ def extract_plan_rule(plan: Dict[str, Any]) -> Dict[str, Any]:
         "game_default": deepcopy(plan.get("game_default") or {"property_list": []}),
         "custom_info": deepcopy(plan.get("custom_info") or {"property_list": []}),
         "plan_only_special_property": bool(plan.get("plan_only_special_property", False)),
-        "plan_effective_property_list": deepcopy(
-            plan.get("plan_effective_property_list") or []
-        ),
+        "plan_effective_property_list": deepcopy(plan.get("plan_effective_property_list") or []),
         "updated_at": _now(),
         "source": "mys",
     }
@@ -209,9 +205,7 @@ def build_equip_plan_info_from_rule(
         "valid_property_cnt": valid_property_cnt,
         "plan_only_special_property": bool(rule.get("plan_only_special_property", False)),
         "equip_rating": "",
-        "plan_effective_property_list": deepcopy(
-            rule.get("plan_effective_property_list") or []
-        ),
+        "plan_effective_property_list": deepcopy(rule.get("plan_effective_property_list") or []),
         "equip_rating_score": 0,
         "_score_source": "cache_computed",
     }
@@ -302,9 +296,7 @@ def ensure_official_score(data: Dict[str, Any], *, force_recompute: bool = False
             update_official_plan_cache(char_id, plan)
             rule = extract_plan_rule(plan)
             effective_ids = get_effective_ids_from_rule(rule)
-            if effective_ids and (
-                force_recompute or _need_recompute_valids(equips)
-            ):
+            if effective_ids and (force_recompute or _need_recompute_valids(equips)):
                 total_hit = _apply_rule_to_equips(equips, effective_ids)
                 # 旧数据 valid 缺失时，同步刷新命中总数
                 if plan.get("valid_property_cnt") is None or force_recompute:
@@ -414,14 +406,127 @@ def process_avatars_on_refresh(
     *,
     source: str,
 ) -> List[Dict[str, Any]]:
-    result = []
+    result: List[Dict[str, Any]] = []
     for avatar in avatars:
-        if not isinstance(avatar, dict):
-            result.append(avatar)
-            continue
         data = dict(avatar)
         if source == "MYS" and has_official_mys_plan(data):
             update_official_plan_cache(data.get("id"), data["equip_plan_info"])
         ensure_official_score(data, force_recompute=(source != "MYS"))
         result.append(data)
+    return result
+
+
+def merge_mys_avatar_score(
+    local_avatar: Dict[str, Any],
+    mys_avatar: Dict[str, Any],
+) -> Dict[str, Any]:
+    """把 MYS 的官方评分方案合并进本地角色数据（可保留 Enka 其它字段）。
+
+    优先使用 MYS 的 equip + equip_plan_info（含服务端 valid / 评级 / 命中），
+    保证刷新后本地 JSON 真正带上官方分。
+    """
+    data = dict(local_avatar)
+    plan = mys_avatar.get("equip_plan_info")
+    if isinstance(plan, dict) and plan:
+        # 深拷贝，避免后续修改污染
+        data["equip_plan_info"] = deepcopy(plan)
+        # 清掉回算标记
+        data["equip_plan_info"].pop("_score_source", None)
+        update_official_plan_cache(data.get("id") or mys_avatar.get("id"), plan)
+
+    # 驱动盘以 MYS 为准（官方 valid / 未命中字段完整）
+    if mys_avatar.get("equip"):
+        data["equip"] = deepcopy(mys_avatar["equip"])
+
+    # 属性条也以 MYS 为准（更完整）
+    if mys_avatar.get("properties"):
+        data["properties"] = deepcopy(mys_avatar["properties"])
+
+    if mys_avatar.get("weapon"):
+        data["weapon"] = deepcopy(mys_avatar["weapon"])
+
+    ensure_official_score(data, force_recompute=False)
+    data["_official_score_applied"] = True
+    data["_score_merged_from_mys"] = True
+    return data
+
+
+async def supplement_official_score_from_mys(
+    uid: str,
+    avatars: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """用米游社 Cookie 拉取 avatar/info，把官方评分合并进本地角色列表。
+
+    - Enka/MiniGG 刷新成功但列表里没有 equip_plan_info 时的关键补丁
+    - 查询面板时本地缺评分的兜底
+    无 Cookie / 请求失败时原样返回。
+    """
+    if not avatars:
+        return avatars
+
+    # 已全部具备 MYS 原装 plan 则跳过
+    need_ids: List[Any] = []
+    for a in avatars:
+        if not isinstance(a, dict):
+            continue
+        if has_official_mys_plan(a) and not _need_recompute_valids(a.get("equip") or []):
+            continue
+        if a.get("id") is not None:
+            need_ids.append(a["id"])
+
+    if not need_ids:
+        return avatars
+
+    try:
+        from ..utils.zzzero_api import zzz_api
+    except Exception as e:
+        logger.warning(f"[官方评分] 无法导入 zzz_api: {e}")
+        return avatars
+
+    ck = await zzz_api.zzz_get_ck(str(uid), "OWNER")
+    if not ck:
+        logger.info(f"[官方评分] UID={uid} 无主人 Cookie，跳过 MYS 补分")
+        return avatars
+
+    # 去重保持顺序
+    seen = set()
+    id_list = []
+    for i in need_ids:
+        if i not in seen:
+            seen.add(i)
+            id_list.append(i)
+
+    try:
+        mys_list = await zzz_api.get_zzz_avatar_info(str(uid), id_list)
+    except Exception as e:
+        logger.warning(f"[官方评分] MYS avatar/info 请求异常: {e}")
+        return avatars
+
+    if isinstance(mys_list, int):
+        logger.warning(f"[官方评分] MYS avatar/info 失败 retcode={mys_list}")
+        return avatars
+
+    # get_zzz_avatar_info 标注为 List[ZZZAvatarInfo]，运行时是普通 dict
+    mys_map: Dict[int, Dict[str, Any]] = {}
+    for item in mys_list:
+        row: Dict[str, Any] = cast(Dict[str, Any], item)
+        raw_id = row.get("id")
+        if raw_id is None:
+            continue
+        mys_map[int(raw_id)] = row
+    if not mys_map:
+        return avatars
+
+    result: List[Dict[str, Any]] = []
+    for avatar in avatars:
+        local: Dict[str, Any] = dict(avatar)
+        raw_local_id = local.get("id")
+        mid = int(raw_local_id) if raw_local_id is not None else 0
+        mys_row = mys_map.get(mid)
+        if mys_row is not None and mys_row.get("equip_plan_info"):
+            result.append(merge_mys_avatar_score(local, mys_row))
+            logger.info(f"[官方评分] 已合并 MYS 评分 char_id={mid}")
+        else:
+            ensure_official_score(local)
+            result.append(local)
     return result
