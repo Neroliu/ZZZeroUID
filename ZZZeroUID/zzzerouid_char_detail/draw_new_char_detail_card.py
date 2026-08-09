@@ -20,7 +20,6 @@ from .utils import (
     get_skill_dict,
     map_equip_rating,
     get_equip_plan_info,
-    get_effective_display_names,
 )
 from .dmg_cal import get_dmg
 from ..utils.image import (
@@ -92,6 +91,36 @@ def _equip_name_display(name: str) -> str:
     if len(name) >= 3 and name[-1] == "]" and "[" in name:
         return name[: name.rfind("[")]
     return name
+
+
+def _miss_badge_color(invalid_cnt: int) -> tuple:
+    """未命中次数底色：红0 / 橙1 / 紫2 / 蓝3 / 灰4+。"""
+    n = max(0, int(invalid_cnt or 0))
+    if n <= 0:
+        return (255, 70, 70)  # 红：0 次（满命中）
+    if n == 1:
+        return (255, 146, 0)  # 橙
+    if n == 2:
+        return (177, 0, 255)  # 紫
+    if n == 3:
+        return (0, 151, 255)  # 蓝
+    return (160, 160, 160)  # 灰：4 次及以上
+
+
+def _add_roll_badge_color(add_n: int) -> tuple:
+    """词条强化次数 +N 底色：红1 橙2 紫3 蓝4 绿5+（越高越艳）。"""
+    n = max(0, int(add_n or 0))
+    if n <= 0:
+        return (90, 90, 90)
+    if n == 1:
+        return (255, 70, 70)  # 红
+    if n == 2:
+        return (255, 146, 0)  # 橙
+    if n == 3:
+        return (177, 0, 255)  # 紫
+    if n == 4:
+        return (0, 151, 255)  # 蓝
+    return (40, 200, 90)  # 绿：5+
 
 
 def _score_source_tag(plan: Dict[str, Any]) -> str:
@@ -177,11 +206,9 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
             pass
 
     plan = get_equip_plan_info(data)
-    effective_names = get_effective_display_names(plan)
     official_rank = map_equip_rating(plan.get("equip_rating", "") if plan else "")
     valid_hit_total = int(plan.get("valid_property_cnt", 0) or 0) if plan else 0
     is_cache_score = bool(_score_source_tag(plan) if plan else "")
-    source_tag = _score_source_tag(plan) if plan else ""
 
     dmg = get_dmg(data)
     # 恢复与改版前一致的总高度，避免驱动盘/伤害区错位
@@ -321,36 +348,9 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
 
     scoring_ready = _has_scoring_valids(equips, plan)
 
+    # 注意：equip_bg 顶部约 0~110px 为全透明，与 weapon_bar 底部设计重叠衔接。
+    # 禁止在该透明区写字/贴评级，否则会飘在武器区上（如「攻击力百分比」与 A 重叠）。
     equip_bg = Image.open(TEXT_PATH / "equip_bg.png")
-    equip_bg_draw = ImageDraw.Draw(equip_bg)
-
-    # 在 equip_bg 原有标题空白区写短摘要（不改变 paste 坐标，避免与 weapon 错位）
-    # equip 卡片从 y≈113 开始，顶部约 0~100 可写字
-    if scoring_ready and plan:
-        summary = f"有效副属性共命中 {valid_hit_total} 次"
-        if source_tag:
-            summary = f"{summary} · {source_tag}"
-        equip_bg_draw.text(
-            (60, 42),
-            summary,
-            "white",
-            zzz_font_thin(26),
-            "lm",
-        )
-        if effective_names:
-            name_str = " / ".join(effective_names)
-            if len(name_str) > 28:
-                name_str = name_str[:27] + "…"
-            equip_bg_draw.text(
-                (60, 74),
-                name_str,
-                YELLOW,
-                zzz_font_thin(20),
-                "lm",
-            )
-        if official_rank and not is_cache_score:
-            rank_img = get_rank_img(official_rank, 52, 52)
-            equip_bg.paste(rank_img, (990, 30), rank_img)
 
     for equip in equips:
         equip_bar = Image.open(TEXT_PATH / "equip_bar.png")
@@ -438,12 +438,18 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                 "rm",
             )
 
+            # 副属性行：属性名 / +N徽章 / 数值 分行绘制，避免「+1」与「9.6%」粘成「+19.6%」
+            prop_name_font = zzz_font_thin(20)
+            prop_val_font = zzz_font_thin(20)
+            prop_add_font = zzz_font_thin(15)
+            row_cy = 23  # 行高 46，垂直居中
+
             for eindex, ep in enumerate(eq_p):
                 equip_prop_bar = Image.new("RGBA", (290, 46))
                 equip_prop_draw = ImageDraw.Draw(equip_prop_bar)
                 equip_prop_draw.rounded_rectangle((5, 4, 285, 42), 8)
-                ep_prop_img = get_prop_img(ep["property_id"], 35, 35)
-                equip_prop_bar.paste(ep_prop_img, (14, 7), ep_prop_img)
+                ep_prop_img = get_prop_img(ep["property_id"], 32, 32)
+                equip_prop_bar.paste(ep_prop_img, (12, 7), ep_prop_img)
 
                 # 无可信评分时不把 Enka 的 valid=False 画成「废词条灰」
                 if scoring_ready:
@@ -453,22 +459,55 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                     ep_color = "white"
 
                 add_n = int(ep.get("add") or 0)
-                prop_label = str(ep.get("property_name") or "")
-                if scoring_ready and add_n > 0:
-                    prop_label = f"{prop_label} +{add_n}"
+                prop_name = str(ep.get("property_name") or "")
+                prop_val = str(ep.get("base") or "")
 
+                # 左侧属性名（缩小字号，y 轴居中）
+                name_x = 48
                 equip_prop_draw.text(
-                    (60, 23),
-                    prop_label,
+                    (name_x, row_cy),
+                    prop_name,
                     ep_color,
-                    zzz_font_thin(25),
+                    prop_name_font,
                     "lm",
                 )
+
+                # +N 独立 badge，与数值分开；加的越多颜色越艳（红橙紫蓝绿）
+                if add_n > 0:
+                    name_bbox = equip_prop_draw.textbbox(
+                        (0, 0), prop_name, font=prop_name_font
+                    )
+                    name_w = name_bbox[2] - name_bbox[0]
+                    badge_txt = f"+{add_n}"
+                    tb = equip_prop_draw.textbbox((0, 0), badge_txt, font=prop_add_font)
+                    tw = tb[2] - tb[0]
+                    th = tb[3] - tb[1]
+                    pad_x, pad_y = 5, 2
+                    bw = tw + pad_x * 2
+                    bh = max(16, th + pad_y * 2)
+                    # 数值区预留右侧约 72px，避免 badge 与数值重叠
+                    bx = min(name_x + name_w + 5, 285 - 72 - bw)
+                    by = (46 - bh) // 2
+                    badge_color = _add_roll_badge_color(add_n)
+                    equip_prop_draw.rounded_rectangle(
+                        (bx, by, bx + bw, by + bh),
+                        4,
+                        badge_color,
+                    )
+                    equip_prop_draw.text(
+                        (bx + bw // 2, row_cy),
+                        badge_txt,
+                        "white",
+                        prop_add_font,
+                        "mm",
+                    )
+
+                # 右侧数值（同 y 轴居中）
                 equip_prop_draw.text(
-                    (266, 23),
-                    str(ep.get("base") or ""),
+                    (278, row_cy),
+                    prop_val,
                     ep_color,
-                    zzz_font_thin(27),
+                    prop_val_font,
                     "rm",
                 )
                 equip_bar.paste(
@@ -477,14 +516,14 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                     equip_prop_bar,
                 )
 
-            # 单盘：满命中 / 未命中N；无评分规则时 --
+            # 单盘：满命中 / 未命中N；底色按次数：红0 橙1 紫2 蓝3 灰4+
             if scoring_ready:
-                if all_hit or invalid_cnt == 0:
+                miss_n = 0 if (all_hit or invalid_cnt == 0) else int(invalid_cnt)
+                if miss_n == 0:
                     badge_text = "满命中"
-                    badge_color = (255, 196, 1)
                 else:
-                    badge_text = f"未命中{invalid_cnt}"
-                    badge_color = (160, 160, 160)
+                    badge_text = f"未命中{miss_n}"
+                badge_color = _miss_badge_color(miss_n)
             else:
                 badge_text = "--"
                 badge_color = (160, 160, 160)
@@ -581,7 +620,8 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                 "rm",
             )
 
-    # 武器区总评：官方字母 +「N次」（布局与旧版一致）
+    # 武器区总评（唯一展示位）：官方字母 +「N次」
+    # 素材 weapon_bar 底部已有「驱动盘评分」底图，勿再往 equip_bg 透明顶区画
     if official_rank and not is_cache_score:
         weapon_equip_rank = get_rank_img(official_rank, 49, 49)
         weapon_bg.paste(weapon_equip_rank, (563, 437), weapon_equip_rank)
