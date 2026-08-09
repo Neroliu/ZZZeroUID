@@ -1,6 +1,6 @@
 import json
 import random
-from typing import Union
+from typing import Any, Dict, List, Union, Optional
 from pathlib import Path
 
 import aiofiles
@@ -14,13 +14,13 @@ from .utils import (
     BLUE,
     YELLOW,
     CUSTOM_LEFT,
+    INVALID_GREY,
     CUSTOM_OFFSET,
-    ID_TO_PROP_NAME,
-    PROP_NAME_TO_ID,
     WEAPON_EQUIP_POS,
-    PartnerScore_Dict,
-    get_ep_value,
     get_skill_dict,
+    map_equip_rating,
+    get_equip_plan_info,
+    get_effective_display_names,
 )
 from .dmg_cal import get_dmg
 from ..utils.image import (
@@ -36,6 +36,7 @@ from ..utils.image import (
     get_mind_role_img,
     get_player_card_min,
 )
+from .official_score import ensure_official_score
 from ..utils.name_convert import char_name_to_char_id
 from ..utils.fonts.zzz_fonts import (
     zzz_font_28,
@@ -52,7 +53,6 @@ is_custom = ZZZ_CONFIG.get_config("EnableCustomCharBG").data
 TEXT_PATH = Path(__file__).parent / "texture2d"
 STAR_PATH = TEXT_PATH / "star"
 
-
 prop_id_to_icon = {
     "1": "IconHpMax",
     "2": "IconAttack",
@@ -68,12 +68,63 @@ prop_id_to_icon = {
     "12": "IconSpGetRatio",
     "13": "IconSpMax",
     "19": "IconSheerForce",
+    "232": "IconPenValue",
     "315": "IconPhysDmg",
     "316": "IconFire",
     "317": "IconIce",
     "318": "IconThunder",
     "319": "IconDungeonBuffEther",
 }
+
+
+def _format_prop_value(prop: Dict[str, Any]) -> str:
+    final = prop.get("final", "")
+    if isinstance(final, str):
+        return final
+    return f"{final:.1f}"
+
+
+def _equip_name_display(name: str) -> str:
+    if len(name) >= 3 and name[-1] == "]" and "[" in name:
+        return name[: name.rfind("[")]
+    return name
+
+
+def _score_source_tag(plan: Dict[str, Any]) -> str:
+    if plan.get("_score_source") == "cache_computed":
+        return "缓存回算"
+    if plan.get("_score_source") == "legacy_valids":
+        return "旧数据"
+    if (plan.get("cultivate_info") or {}).get("name") == "cache_computed":
+        return "缓存回算"
+    if (plan.get("cultivate_info") or {}).get("name") == "legacy_valids":
+        return "旧数据"
+    return ""
+
+
+def _has_scoring_valids(equips: List[Dict[str, Any]], plan: Optional[Dict[str, Any]]) -> bool:
+    """是否具备可信的 valid 评分（避免 Enka 全 False 被当成已评分）。"""
+    if not plan:
+        return False
+    if any(p.get("valid") is True for eq in equips if "id" in eq for p in (eq.get("properties") or [])):
+        return True
+    # MYS 原装可能全有效但仍有 equip_rating
+    if plan.get("equip_rating") and plan.get("_score_source") not in (
+        "cache_computed",
+        "legacy_valids",
+    ):
+        return True
+    if plan.get("valid_property_cnt") and plan.get("equip_rating"):
+        return True
+    # 缓存回算后可能 0 命中但仍有 plan
+    if plan.get("_score_source") in ("cache_computed", "legacy_valids"):
+        return True
+    if (plan.get("cultivate_info") or {}).get("name") in (
+        "cache_computed",
+        "legacy_valids",
+    ):
+        return True
+    return False
 
 
 async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, bytes]:
@@ -87,9 +138,27 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
         return f"[绝区零] 未找到该角色信息, 请先使用[{prefix}刷新面板]进行刷新!"
 
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
-        data = json.loads(await f.read())  # noqa: F841
+        data = json.loads(await f.read())
+
+    # 旧本地数据 / Enka：补齐评分字段
+    data = ensure_official_score(data)
+    if data.pop("_official_score_applied", False):
+        # 回写本地，避免每次查询重复兼容逻辑
+        try:
+            async with aiofiles.open(path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(data, ensure_ascii=False, indent=4))
+        except Exception:
+            pass
+
+    plan = get_equip_plan_info(data)
+    effective_names = get_effective_display_names(plan)
+    official_rank = map_equip_rating(plan.get("equip_rating", "") if plan else "")
+    valid_hit_total = int(plan.get("valid_property_cnt", 0) or 0) if plan else 0
+    is_cache_score = bool(_score_source_tag(plan) if plan else "")
+    source_tag = _score_source_tag(plan) if plan else ""
 
     dmg = get_dmg(data)
+    # 恢复与改版前一致的总高度，避免驱动盘/伤害区错位
     img = get_zzz_bg(1100, 2525 + 58 * len(dmg), "bg3")
 
     # 角色部分
@@ -159,61 +228,32 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
     property_bg = Image.open(TEXT_PATH / "prop_bg.png")
     property_draw = ImageDraw.Draw(property_bg)
 
-    partner_data = PartnerScore_Dict.get(str(char_id), {})
     pindex = 0
     for prop in props:
         prop_name: str = prop["property_name"]
-        if "伤害加成" in prop_name:
-            _pid = "315"
-        else:
-            if prop_name not in PROP_NAME_TO_ID:
-                continue
-            _pid = PROP_NAME_TO_ID[prop_name]
         prop_name = prop_name.replace("属性伤害", "伤")
+        pid = str(prop["property_id"])
 
-        if str(prop["property_id"]) in prop_id_to_icon:
-            icon = get_prop_img(
-                prop_id_to_icon[str(prop["property_id"])],
-                50,
-                50,
-            )
+        if pid in prop_id_to_icon:
+            icon = get_prop_img(prop_id_to_icon[pid], 50, 50)
         else:
-            continue
+            icon = get_prop_img(prop["property_id"], 50, 50)
 
         property_bg.paste(icon, (53, 3 + int(pindex * 59.6)), icon)
 
-        _pname = ID_TO_PROP_NAME[_pid]
-        if _pname in partner_data:
-            prop_value = partner_data[_pname]
-            if prop_value >= 1:
-                name_color = YELLOW
-            elif prop_value >= 0.75:
-                name_color = BLUE
-            elif prop_value >= 0.25:
-                name_color = "white"
-            else:
-                name_color = (182, 182, 182)
-        else:
-            name_color = "white"
-
-        if isinstance(prop["final"], str):
-            value = prop["final"]
-        else:
-            # 保留一位小数
-            value = f"{prop['final']:.1f}"
-
+        value = _format_prop_value(prop)
         y = int(27.8 + pindex * 58.6)
         property_draw.text(
             (431, y),
             value,
-            name_color,
+            "white",
             zzz_font_thin(32),
             "rm",
         )
         property_draw.text(
             (114, y),
             prop_name,
-            name_color,
+            "white",
             zzz_font_thin(32),
             "lm",
         )
@@ -241,19 +281,51 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
     img.paste(skill_bg, (0, 957), skill_bg)
 
     weapon_bg = Image.open(TEXT_PATH / "weapon_bar.png")
-    all_score_value = 0
+
     # 驱动盘
-    _equips = data["equip"]
-    equips = []
+    _equips = data.get("equip") or []
+    equips: List[Dict[str, Any]] = []
     for s in range(6):
         for i in _equips:
-            if i["equipment_type"] == s + 1:
+            if i.get("equipment_type") == s + 1:
                 equips.append(i)
                 break
         else:
             equips.append({"equipment_type": s + 1})
 
+    scoring_ready = _has_scoring_valids(equips, plan)
+
     equip_bg = Image.open(TEXT_PATH / "equip_bg.png")
+    equip_bg_draw = ImageDraw.Draw(equip_bg)
+
+    # 在 equip_bg 原有标题空白区写短摘要（不改变 paste 坐标，避免与 weapon 错位）
+    # equip 卡片从 y≈113 开始，顶部约 0~100 可写字
+    if scoring_ready and plan:
+        summary = f"有效副属性共命中 {valid_hit_total} 次"
+        if source_tag:
+            summary = f"{summary} · {source_tag}"
+        equip_bg_draw.text(
+            (60, 42),
+            summary,
+            "white",
+            zzz_font_thin(26),
+            "lm",
+        )
+        if effective_names:
+            name_str = " / ".join(effective_names)
+            if len(name_str) > 28:
+                name_str = name_str[:27] + "…"
+            equip_bg_draw.text(
+                (60, 74),
+                name_str,
+                YELLOW,
+                zzz_font_thin(20),
+                "lm",
+            )
+        if official_rank and not is_cache_score:
+            rank_img = get_rank_img(official_rank, 52, 52)
+            equip_bg.paste(rank_img, (990, 30), rank_img)
+
     for equip in equips:
         equip_bar = Image.open(TEXT_PATH / "equip_bar.png")
         _type = equip["equipment_type"]
@@ -262,9 +334,18 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
         if "id" in equip:
             equip_id = equip["id"]
             equip_level = equip["level"]
-            equip_name = equip["name"][:-3]
-            eq_mp = equip["main_properties"][0]
-            eq_p = equip["properties"]
+            equip_name = _equip_name_display(str(equip.get("name") or ""))
+            main_props = equip.get("main_properties") or []
+            eq_p = equip.get("properties") or []
+            if not main_props:
+                empty = Image.open(TEXT_PATH / "empty_equip.png")
+                equip_bar.paste(empty, (0, 0), empty)
+                equip_bg.paste(equip_bar, (-5 + ox, 113 + oy), equip_bar)
+                continue
+
+            eq_mp = main_props[0]
+            invalid_cnt = int(equip.get("invalid_property_cnt") or 0)
+            all_hit = bool(equip.get("all_hit"))
 
             equip_draw = ImageDraw.Draw(equip_bar)
 
@@ -283,11 +364,11 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                 "mm",
             )
 
-            if equip["rarity"] == "A":
+            if equip.get("rarity") == "A":
                 equip_color = (177, 0, 255)
-            elif equip["rarity"] == "S":
+            elif equip.get("rarity") == "S":
                 equip_color = (255, 146, 0)
-            elif equip["rarity"] == "B":
+            elif equip.get("rarity") == "B":
                 equip_color = (0, 167, 255)
             else:
                 equip_color = (90, 90, 90)
@@ -308,15 +389,14 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
 
             equip_img = equip_img.resize((100, 100))
 
-            equip_rarity = get_rarity_img(equip["rarity"])
+            equip_rarity = get_rarity_img(equip.get("rarity") or "B")
             equip_bar.paste(equip_rarity, (272, 46), equip_rarity)
             equip_bar.paste(equip_img, (22, 0), equip_img)
 
             equip_draw.rounded_rectangle((71, 186, 350, 231), 8, BLUE)
             mp_img = get_prop_img(eq_mp["property_id"], 38, 38)
-            score_value = 0
             equip_bar.paste(mp_img, (80, 190), mp_img)
-            ep_prop_name = eq_mp["property_name"].replace("属性伤害", "伤")
+            ep_prop_name = str(eq_mp.get("property_name") or "").replace("属性伤害", "伤")
             equip_draw.text(
                 (128, 208),
                 ep_prop_name,
@@ -326,7 +406,7 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
             )
             equip_draw.text(
                 (331, 208),
-                eq_mp["base"],
+                str(eq_mp.get("base") or ""),
                 "white",
                 zzz_font_thin(30),
                 "rm",
@@ -339,39 +419,28 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                 ep_prop_img = get_prop_img(ep["property_id"], 35, 35)
                 equip_prop_bar.paste(ep_prop_img, (14, 7), ep_prop_img)
 
-                ep_base = ep["base"]
-                ep_pid = str(ep["property_id"])
-                ep_name = ID_TO_PROP_NAME[ep_pid]
-
-                if ep_name in partner_data:
-                    prop_value = partner_data[ep_name]
-                    if prop_value >= 1:
-                        ep_color = YELLOW
-                    elif prop_value >= 0.75:
-                        ep_color = (0, 151, 254)
-                    elif prop_value >= 0.25:
-                        ep_color = "white"
-                    else:
-                        ep_color = (170, 170, 170)
+                # 无可信评分时不把 Enka 的 valid=False 画成「废词条灰」
+                if scoring_ready:
+                    is_valid = bool(ep.get("valid"))
+                    ep_color = YELLOW if is_valid else INVALID_GREY
                 else:
-                    ep_color = (170, 170, 170)
+                    ep_color = "white"
 
-                ep_value = get_ep_value(
-                    char_id,
-                    ep_pid,
-                    ep_base,
-                )
-                score_value += ep_value
+                add_n = int(ep.get("add") or 0)
+                prop_label = str(ep.get("property_name") or "")
+                if scoring_ready and add_n > 0:
+                    prop_label = f"{prop_label} +{add_n}"
+
                 equip_prop_draw.text(
                     (60, 23),
-                    ep["property_name"],
+                    prop_label,
                     ep_color,
                     zzz_font_thin(25),
                     "lm",
                 )
                 equip_prop_draw.text(
                     (266, 23),
-                    ep_base,
+                    str(ep.get("base") or ""),
                     ep_color,
                     zzz_font_thin(27),
                     "rm",
@@ -382,28 +451,26 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                     equip_prop_bar,
                 )
 
-            if score_value >= 40:
-                score_color = (255, 196, 1)
-            elif score_value >= 35:
-                score_color = (230, 66, 255)
-            elif score_value >= 30:
-                score_color = BLUE
+            # 单盘：满命中 / 未命中N；无评分规则时 --
+            if scoring_ready:
+                if all_hit or invalid_cnt == 0:
+                    badge_text = "满命中"
+                    badge_color = (255, 196, 1)
+                else:
+                    badge_text = f"未命中{invalid_cnt}"
+                    badge_color = (160, 160, 160)
             else:
-                score_color = (160, 160, 160)
+                badge_text = "--"
+                badge_color = (160, 160, 160)
 
-            all_score_value += score_value
-
-            score_value_str = format(score_value, ".1f")
-            equip_draw.rounded_rectangle(
-                (264, 128, 350, 162),
-                10,
-                score_color,
-            )
+            badge_w = 110 if len(badge_text) <= 4 else 130
+            bx1, bx2 = 350 - badge_w, 350
+            equip_draw.rounded_rectangle((bx1, 128, bx2, 162), 10, badge_color)
             equip_draw.text(
-                (307, 145),
-                f"{score_value_str}分",
+                ((bx1 + bx2) // 2, 145),
+                badge_text,
                 "black",
-                zzz_font_thin(26),
+                zzz_font_thin(20),
                 "mm",
             )
         else:
@@ -411,20 +478,22 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
             equip_bar.paste(empty, (0, 0), empty)
         equip_bg.paste(equip_bar, (-5 + ox, 113 + oy), equip_bar)
 
+    # 与改版前一致：驱动盘贴在 1397（与 weapon 底部设计重叠衔接）
     img.paste(equip_bg, (0, 1397), equip_bg)
 
     # 武器部分
-    weapon = data["weapon"]
+    weapon = data.get("weapon")
     camp_img = get_camp_img(data["camp_name_mi18n"])
     weapon_draw = ImageDraw.Draw(weapon_bg)
     if weapon:
         weapon_name = weapon["name"]
         weapon_level = weapon["level"]
-        main_ps = weapon["main_properties"]
-        weapon_ps = weapon["properties"]
+        main_ps = weapon.get("main_properties") or []
+        weapon_ps = weapon.get("properties") or []
 
-        weapon_rank_icon = get_rank_img(weapon["rarity"], 64, 64)
-        weapon_star_icon = Image.open(STAR_PATH / f"{weapon['star']}.png")
+        weapon_rank_icon = get_rank_img(weapon.get("rarity") or "B", 64, 64)
+        star = int(weapon.get("star") or 0)
+        weapon_star_icon = Image.open(STAR_PATH / f"{star}.png")
         weapon_img = await get_weapon(weapon["id"])
         weapon_img = weapon_img.resize((240, 240)).convert("RGBA")
 
@@ -439,25 +508,26 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
             zzz_font_28,
             "mm",
         )
-        main_p = main_ps[0]
-        main_prop_id = main_p["property_id"]
-        main_prop_img = get_prop_img(main_prop_id, 45, 45)
-        weapon_draw.rounded_rectangle((561, 265, 861, 313), 8, BLUE)
-        weapon_bg.paste(main_prop_img, (570, 266), main_prop_img)
-        weapon_draw.text(
-            (620, 289),
-            main_p["property_name"],
-            "White",
-            zzz_font_thin(26),
-            "lm",
-        )
-        weapon_draw.text(
-            (842, 289),
-            main_p["base"],
-            YELLOW,
-            zzz_font_thin(30),
-            "rm",
-        )
+        if main_ps:
+            main_p = main_ps[0]
+            main_prop_id = main_p["property_id"]
+            main_prop_img = get_prop_img(main_prop_id, 45, 45)
+            weapon_draw.rounded_rectangle((561, 265, 861, 313), 8, BLUE)
+            weapon_bg.paste(main_prop_img, (570, 266), main_prop_img)
+            weapon_draw.text(
+                (620, 289),
+                main_p["property_name"],
+                "White",
+                zzz_font_thin(26),
+                "lm",
+            )
+            weapon_draw.text(
+                (842, 289),
+                main_p["base"],
+                YELLOW,
+                zzz_font_thin(30),
+                "rm",
+            )
 
         for pindex, p in enumerate(weapon_ps):
             wp_o = pindex * 60
@@ -485,26 +555,26 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
                 "rm",
             )
 
-    if all_score_value >= 200:
-        equip_rank = "S"
-    elif all_score_value >= 150:
-        equip_rank = "A"
-    else:
-        equip_rank = "B"
-    weapon_equip_rank = get_rank_img(equip_rank, 49, 49)
-    weapon_bg.paste(weapon_equip_rank, (563, 437), weapon_equip_rank)
+    # 武器区总评：官方字母 +「N次」（布局与旧版一致）
+    if official_rank and not is_cache_score:
+        weapon_equip_rank = get_rank_img(official_rank, 49, 49)
+        weapon_bg.paste(weapon_equip_rank, (563, 437), weapon_equip_rank)
     weapon_bg.paste(camp_img, (875, 156), camp_img)
-    all_score_value_str = format(all_score_value, ".1f")
+
+    if scoring_ready:
+        score_label = f"{valid_hit_total}次"
+    else:
+        score_label = "--"
     weapon_draw.text(
         (739, 448),
-        f"{all_score_value_str}分",
+        score_label,
         "white",
         zzz_font_40,
         "mm",
     )
     img.paste(weapon_bg, (0, 949), weapon_bg)
 
-    # 伤害部分
+    # 伤害部分（原坐标）
     for index, d in enumerate(dmg):
         al = dmg[d]
         d = d.replace("强化特殊技", "强特")

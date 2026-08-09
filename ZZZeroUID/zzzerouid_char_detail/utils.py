@@ -1,6 +1,4 @@
-import json
-from typing import Dict, Tuple, Union
-from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # 雅 & 浅羽版本
 CUSTOM_OFFSET = {
@@ -44,84 +42,63 @@ WEAPON_EQUIP_POS = {
 GREY = (210, 210, 210)
 BLUE = (0, 151, 255)
 YELLOW = (255, 188, 0)
-SCORE_MAP = {
-    "11103": 0.043,
-    "11102": 1.6,
-    "12103": 0.25,
-    "12102": 1.6,
-    "13103": 0.32,
-    "13102": 1,
-    "20103": 2,
-    "21103": 1,
-    "23203": 0.53,  # 穿透值
-    "23103": 1.1,  # 穿透率
-    "31203": 0.5,  # 异常精通
-    "12203": 1,  # 冲击力
-    "315": 0,
-    "30503": 1.1,  # 能量自动回复
-    "31403": 1.1,  # 异常掌控
-}
-PROP_NAME_TO_ID = {
-    "生命值": "11103",
-    "生命值百分比": "11102",
-    "攻击力": "12103",
-    "攻击力百分比": "12102",
-    "防御力": "13103",
-    "防御力百分比": "13102",
-    "冲击力": "12203",
-    "暴击率": "20103",
-    "暴击伤害": "21103",
-    "异常掌控": "31403",
-    "异常精通": "31203",
-    "穿透率": "23103",
-    "穿透值": "23203",
-    "能量自动回复": "30502",
-    "能量回复百分比": "30502",
-    "贯穿力": "19",
-}
-ID_TO_PROP_NAME = {
-    "11103": "生命值",
-    "11102": "生命值百分比",
-    "12103": "攻击力",
-    "12102": "攻击力百分比",
-    "13103": "防御力",
-    "13102": "防御力百分比",
-    "12203": "冲击力",
-    "20103": "暴击率",
-    "21103": "暴击伤害",
-    "31403": "异常掌控",
-    "31203": "异常精通",
-    "23103": "穿透率",
-    "23203": "穿透值",
-    "30503": "能量自动回复",
-    "30502": "能量自动回复",
-    "315": "伤害加成",
-    "19": "贯穿力",
+INVALID_GREY = (170, 170, 170)
+
+# 官方 equip_rating -> 面板评级字母
+EQUIP_RATING_MAP = {
+    "ER_S+": "S+",
+    "ER_S_PLUS": "S+",
+    "ER_SP": "S+",
+    "ER_S": "S",
+    "ER_A": "A",
+    "ER_B": "B",
+    "ER_C": "C",
 }
 
-PartenrScore_File = Path(__file__).parents[1] / "utils" / "map" / "PartnerScore.json"
 
-with open(PartenrScore_File, "r", encoding="utf-8") as f:
-    PartnerScore_Dict: Dict[str, Dict[str, float]] = json.load(f)
+def map_equip_rating(equip_rating: str) -> str:
+    """将官方 equip_rating (如 ER_S) 映射为 S/A/B/S+。"""
+    if not equip_rating:
+        return ""
+    raw = str(equip_rating).strip().upper()
+    if raw in EQUIP_RATING_MAP:
+        return EQUIP_RATING_MAP[raw]
+    if raw.startswith("ER_"):
+        tail = raw[3:].replace("_PLUS", "+").replace("PLUS", "+")
+        if tail in ("S", "A", "B", "C", "S+"):
+            return tail
+        return tail
+    if raw in ("S", "A", "B", "C", "S+"):
+        return raw
+    return raw
 
 
-def get_ep_value(
-    char_id: Union[int, str],
-    epid: Union[int, str],
-    ep: str,
-) -> float:
-    partner_data = PartnerScore_Dict.get(str(char_id), {})
-    ep_name = ID_TO_PROP_NAME[str(epid)]
-    target = partner_data.get(str(ep_name), 0)
-    _epid = int(str(epid)[:3])
-    if "%" in ep:
-        ep = ep[:-1]
-    value = float(ep)
-    if _epid >= 315:
-        target_value = 5.83
-    else:
-        target_value = SCORE_MAP.get(str(epid), 0) * value
-    return target_value * target
+def get_equip_plan_info(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    plan = data.get("equip_plan_info")
+    if isinstance(plan, dict) and plan:
+        return plan
+    return None
+
+
+def get_effective_display_names(plan: Optional[Dict[str, Any]]) -> List[str]:
+    """有效副属性展示名（优先 full_name）。"""
+    if not plan:
+        return []
+    names: List[str] = []
+    for item in plan.get("plan_effective_property_list") or []:
+        name = item.get("full_name") or item.get("name") or ""
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def calc_equip_valid_hit(equip: Dict[str, Any]) -> int:
+    """单盘有效副属性命中次数 = sum(level of valid props)。"""
+    total = 0
+    for prop in equip.get("properties") or []:
+        if prop.get("valid"):
+            total += int(prop.get("level") or 0)
+    return total
 
 
 def get_skill_dict(data: Dict):

@@ -19,6 +19,7 @@ from ..utils.api.models import ZZZAvatarInfo
 from ..utils.zzzero_api import zzz_api
 from ..utils.enka_to_mys import _enka_data_to_mys_data
 from .draw_char_detail_card import TEXT_PATH
+from .official_score import process_avatars_on_refresh
 from ..utils.fonts.zzz_fonts import zzz_font_40
 from ..utils.resource.RESOURCE_PATH import PLAYER_PATH
 from ..zzzerouid_config.zzzero_config import ZZZ_CONFIG
@@ -54,7 +55,7 @@ async def refresh_char_by_enka(
         return error_reply(raw_data)
     data = await _enka_data_to_mys_data(raw_data)
 
-    return await refresh_char(uid, data, ev, only_refresh)
+    return await refresh_char(uid, data, ev, only_refresh, source=SOURCE)
 
 
 async def refresh_char_by_mys(
@@ -70,7 +71,7 @@ async def refresh_char_by_mys(
     if isinstance(data, int):
         return error_reply(data)
 
-    return await refresh_char(uid, data, ev, only_refresh)
+    return await refresh_char(uid, data, ev, only_refresh, source="MYS")
 
 
 async def refresh_char(
@@ -78,14 +79,21 @@ async def refresh_char(
     data: List[ZZZAvatarInfo],
     ev: Event,
     only_refresh: bool = False,
+    source: str = "MYS",
 ) -> Union[str, bytes]:
     now = datetime.now()
     current_time = now.strftime("%Y-%m-%d %H:%M:%S")
 
+    # MYS：写入官方评分规则缓存；Enka/MiniGG：用缓存回算 valid/命中
+    processed = process_avatars_on_refresh(
+        [dict(a) if isinstance(a, dict) else a for a in data],
+        source=source if source == "MYS" else "ENKA",
+    )
+
     path = PLAYER_PATH / str(uid)
     path.mkdir(parents=True, exist_ok=True)
     im = []
-    for avatar in data:
+    for avatar in processed:
         save_data = {}
         save_data.update(avatar)
         _id = avatar["id"]
@@ -103,7 +111,7 @@ async def refresh_char(
 
     is_pic: bool = ZZZ_CONFIG.get_config("RefreshCardUsePic").data
     if is_pic and not only_refresh:
-        return await draw_refresh_card(uid, ev, data)
+        return await draw_refresh_card(uid, ev, processed)  # type: ignore
 
     msg = f"[绝区零] 刷新完成！本次刷新{len(im)}个角色!"
     msg += f"\n刷新角色列表:{','.join(im)}"

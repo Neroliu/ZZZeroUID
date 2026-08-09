@@ -29,6 +29,7 @@ from .api import (
     ZZZ_AVATAR_INFO_API,
     ZZZ_NOTE_WIDGET_API,
     ZZZ_VOID_BATTLE_API,
+    ZZZ_ZENKOV_API,
     ZZZ_AVATAR_BASIC_API,
     ZZZ_GET_GACHA_LOG_API,
 )
@@ -43,6 +44,7 @@ from .models import (
     ZZZHadalData,
     ZZZIndexResp,
     ZZZMonthInfo,
+    ZZZZenkovData,
     ZZZAvatarInfo,
     ZZZAvatarBasic,
     ZZZGachaLogResp,
@@ -231,6 +233,20 @@ class ZZZApi(_MysApi):
         )
         if isinstance(data, Dict):
             data = cast(ZZZVoidFrontBattleData, data["data"])
+        return data
+
+    async def get_zzz_zenkov_info(self, uid: str) -> Union[int, ZZZZenkovData]:
+        """迷宫诡域摘要"""
+        data = await self.simple_zzz_req(
+            ZZZ_ZENKOV_API,
+            uid,
+            params={
+                "uid": uid,
+                "region": self._get_region(uid),
+            },
+        )
+        if isinstance(data, Dict):
+            data = cast(ZZZZenkovData, data["data"])
         return data
 
     async def get_zzz_widget_info(self, uid: str) -> Union[int, ZZZWidgetNoteResp]:

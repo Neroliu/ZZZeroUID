@@ -1,4 +1,5 @@
 {
+    "_deprecated": "已废弃：面板评分改用米游社官方 equip_plan_info / 全局规则缓存 official_equip_plan.json，本文件不再被代码读取。",
     "1011": {
         "生命值百分比": 0,
         "生命值": 0,

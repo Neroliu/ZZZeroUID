@@ -22,6 +22,9 @@ ZZZ_MEM = "/hadal_mem_detail_v2"
 
 ZZZ_VOID_BATTLE_API = "/void_front_battle_detail"
 
+ZZZ_ZENKOV_API = "/zenkov_abstract_info"
+"""迷宫诡域摘要"""
+
 ZZZ_BIND_API = f"{GS_BASE}/binding/api"
 ZZZ_BIND_OS_API = f"{GS_BASE_OS}/binding/api"
 ZZZ_GAME_INFO_API = "/getUserGameRolesByCookie?game_biz=nap_cn"

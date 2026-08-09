@@ -217,10 +217,14 @@ class EquipProperty(TypedDict):
     add: int
 
 
-class EquipMainProperty(TypedDict):
+class EquipMainProperty(TypedDict, total=False):
     property_name: str
     property_id: int
     base: str
+    level: int
+    valid: bool
+    system_id: int
+    add: int
 
 
 class EquipSuit(TypedDict):
@@ -231,7 +235,9 @@ class EquipSuit(TypedDict):
     desc2: str
 
 
-class Equip(TypedDict):
+class Equip(TypedDict, total=False):
+    """驱动盘；invalid_property_cnt / all_hit 在官方或回算后才有。"""
+
     id: int
     level: int
     name: str
@@ -241,6 +247,44 @@ class Equip(TypedDict):
     main_properties: List[EquipMainProperty]
     equip_suit: EquipSuit
     equipment_type: int
+    invalid_property_cnt: int
+    all_hit: bool
+
+
+class PlanProperty(TypedDict):
+    """驱动盘方案中的属性项（长 ID 或面板短 ID）"""
+
+    id: int
+    name: str
+    full_name: str
+    system_id: int
+    is_select: bool
+
+
+class PlanPropertyGroup(TypedDict):
+    property_list: List[PlanProperty]
+
+
+class CultivateInfo(TypedDict, total=False):
+    name: str
+    plan_id: str
+    is_delete: bool
+    old_plan: bool
+
+
+class EquipPlanInfo(TypedDict, total=False):
+    """米游社官方驱动盘评分 / 有效副属性方案（字段随来源可能不全）"""
+
+    type: int
+    game_default: PlanPropertyGroup
+    cultivate_info: CultivateInfo
+    custom_info: PlanPropertyGroup
+    valid_property_cnt: int
+    plan_only_special_property: bool
+    equip_rating: str  # ER_S / ER_A / ER_B ...；缓存回算时可能为空
+    plan_effective_property_list: List[PlanProperty]
+    equip_rating_score: float
+    _score_source: str  # mys 不写；cache_computed 表示规则缓存回算
 
 
 class Weapon(TypedDict):
@@ -270,10 +314,11 @@ class SkillItem(TypedDict):
     text: str
 
 
-class Skill(TypedDict):
+class Skill(TypedDict, total=False):
     level: int
     skill_type: int
     items: List[SkillItem]
+    awaken_state: str
 
 
 class Rank(TypedDict):
@@ -284,8 +329,15 @@ class Rank(TypedDict):
     is_unlocked: bool
 
 
-class ZZZAvatarInfo(TypedDict):
-    """角色详情页面完整信息"""
+class SkillAwaken(TypedDict, total=False):
+    has_awaken_system: bool
+    awaken_level: int
+    awaken_max_level: int
+    skill_awaken_items: list
+
+
+class ZZZAvatarInfo(TypedDict, total=False):
+    """角色详情；equip_plan_info / 皮肤等字段视数据源可选。"""
 
     id: int
     level: int
@@ -303,6 +355,14 @@ class ZZZAvatarInfo(TypedDict):
     skills: List[Skill]
     rank: int
     ranks: List[Rank]
+    equip_plan_info: EquipPlanInfo
+    role_vertical_painting_url: str
+    role_square_url: str
+    us_full_name: str
+    vertical_painting_color: str
+    sub_element_type: int
+    awaken_state: str
+    skill_awaken: SkillAwaken
 
 
 class Stats(TypedDict):
@@ -740,3 +800,92 @@ class ZZZAnnData(TypedDict):
     pic_alert_id: int
     static_sign: str
     banner: str
+
+
+# =================================================
+# 10. 迷宫诡域 (Zenkov)
+# =================================================
+
+
+class ZenkovDuty(TypedDict):
+    cur_duty: int
+    max_duty: int
+
+
+class ZenkovSeasonQuest(TypedDict):
+    cur_quest: int
+    max_quest: int
+
+
+class ZenkovSeasonCoin(TypedDict):
+    cur_coin: int
+    max_coin: int
+
+
+class ZenkovSeasonData(TypedDict):
+    cur_season_id: int
+    season_level: int
+    season_quest: ZenkovSeasonQuest
+    season_coin: ZenkovSeasonCoin
+    refresh_time: int
+    season_stage: int
+
+
+class ZenkovMap(TypedDict):
+    map_id: int
+    map_name: str
+    hell_unlock: bool
+    leave_percent: int
+    max_price: str
+    is_challenge: bool
+
+
+class ZenkovMedalItem(TypedDict):
+    medal_icon: str
+    name: str
+    medal_id: int
+    unlock: bool
+
+
+class ZenkovGoodsItem(TypedDict):
+    goods_icon: str
+    number: int
+    name: str
+    goods_id: int
+    unlock: bool
+
+
+class ZenkovMedalData(TypedDict):
+    list: List[ZenkovMedalItem]
+    cur: int
+    total: int
+
+
+class ZenkovGoodsData(TypedDict):
+    list: List[ZenkovGoodsItem]
+    cur: int
+    total: int
+
+
+class ZenkovCollectionData(TypedDict):
+    medal_data: ZenkovMedalData
+    goods_data: ZenkovGoodsData
+
+
+class ZZZZenkovData(TypedDict):
+    """迷宫诡域摘要 zenkov_abstract_info"""
+
+    nick_name: str
+    avatar_icon: str
+    collect_total_value: str
+    big_red_num: str
+    millions_evacuations: str
+    refresh_time: int
+    abyss_duty: ZenkovDuty
+    abyss_unlock: bool
+    season_unlock: bool
+    season_data: ZenkovSeasonData
+    map_list: List[ZenkovMap]
+    max_rank: int
+    is_show_percent: bool
+    collection_data: ZenkovCollectionData
