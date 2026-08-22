@@ -183,10 +183,7 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
         if patched:
             data = patched[0]
 
-    need_save = bool(
-        data.pop("_official_score_applied", False)
-        or data.pop("_score_merged_from_mys", False)
-    )
+    need_save = bool(data.pop("_official_score_applied", False) or data.pop("_score_merged_from_mys", False))
     if need_save:
         try:
             # 去掉仅内存标记；equip_plan_info 整段保留
@@ -474,9 +471,7 @@ async def draw_char_detail_img(uid: str, ev: Event, char: str) -> Union[str, byt
 
                 # +N 独立 badge，与数值分开；加的越多颜色越艳（红橙紫蓝绿）
                 if add_n > 0:
-                    name_bbox = equip_prop_draw.textbbox(
-                        (0, 0), prop_name, font=prop_name_font
-                    )
+                    name_bbox = equip_prop_draw.textbbox((0, 0), prop_name, font=prop_name_font)
                     name_w = name_bbox[2] - name_bbox[0]
                     badge_txt = f"+{add_n}"
                     tb = equip_prop_draw.textbbox((0, 0), badge_txt, font=prop_add_font)

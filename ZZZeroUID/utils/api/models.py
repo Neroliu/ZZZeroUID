@@ -388,7 +388,7 @@ class ZZZIndexResp(TypedDict):
 class SingleGachaLog(TypedDict):
     uid: str
     gacha_id: str
-    gacha_type: str  # 1-常驻, 2-限定, 3-音擎
+    gacha_type: str  # 1-常驻, 2-限定, 3-音擎, 5-邦布, 102-独家重映, 103-音擎回响
     item_id: str
     count: str
     time: str
