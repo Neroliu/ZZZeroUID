@@ -1,6 +1,6 @@
 import json
 import random
-from typing import Dict, List, Tuple, Union, Optional
+from typing import Dict, List, Tuple, Union
 from pathlib import Path
 from datetime import datetime
 
@@ -137,63 +137,48 @@ def _iter_gachalogs(raw_data: Dict) -> Dict:
     return ordered
 
 
-def _iter_pairings(nodes: List[str]) -> List[List[Tuple[str, Optional[str]]]]:
-    if not nodes:
-        return [[]]
-    if len(nodes) == 1:
-        return [[(nodes[0], None)]]
-    if len(nodes) % 2 == 1:
-        result: List[List[Tuple[str, Optional[str]]]] = []
-        for i, single in enumerate(nodes):
-            rest = nodes[:i] + nodes[i + 1 :]
-            for tail in _iter_pairings(rest):
-                result.append([(single, None)] + tail)
-        return result
-    first, *rest = nodes
-    result = []
-    for i, partner in enumerate(rest):
-        remain = rest[:i] + rest[i + 1 :]
-        for tail in _iter_pairings(remain):
-            result.append([(first, partner)] + tail)
-    return result
+def _pack_two_columns(pools: List[str], heights: List[int]) -> Tuple[List[str], List[str]]:
+    """把卡池分到两列，使整体接近矩形。
 
+    枚举非空划分：先压画布高度，再压列差，大池靠左，左列更少。
+    """
+    n = len(pools)
+    if n == 0:
+        return [], []
+    if n == 1:
+        return [pools[0]], []
 
-def _pair_pools(names: List[str], total_data: Dict) -> List[Tuple[str, Optional[str]]]:
-    """把五星数量接近的卡池左右配对，让每行高度差最小。"""
-    if not names:
-        return []
-    height_map = {n: _pool_block_height(len(total_data[n]["rank_s_list"])) for n in names}
-    s_map = {n: len(total_data[n]["rank_s_list"]) for n in names}
-    order_map = {n: i for i, n in enumerate(names)}
+    tallest = max(range(n), key=lambda i: (heights[i], -i))
+    best_score = None
+    best_left: List[str] = []
+    best_right: List[str] = []
 
-    def score(pairing: List[Tuple[str, Optional[str]]]) -> Tuple[int, int, int]:
-        total_h = 0
-        diff_s = 0
-        order_penalty = 0
-        for left, right in pairing:
-            lh = height_map[left]
-            rh = height_map[right] if right else 0
-            total_h += max(lh, rh)
-            ls = s_map[left]
-            rs = s_map[right] if right else 0
-            diff_s += abs(ls - rs)
-            order_penalty += order_map[left] * 10 + (order_map[right] if right else 0)
-        return (total_h, diff_s, order_penalty)
-
-    best = min(_iter_pairings(names), key=score)
-    rows: List[Tuple[str, Optional[str]]] = []
-    for left, right in best:
-        if right and s_map[right] > s_map[left]:
-            left, right = right, left
-        rows.append((left, right))
-    rows.sort(
-        key=lambda row: (
-            0 if row[1] else 1,
-            -max(s_map[row[0]], s_map[row[1]] if row[1] else 0),
-            order_map[row[0]],
+    for mask in range(1, (1 << n) - 1):
+        left: List[str] = []
+        right: List[str] = []
+        h_l = 0
+        h_r = 0
+        n_left = 0
+        for i in range(n):
+            if mask & (1 << i):
+                left.append(pools[i])
+                h_l += heights[i]
+                n_left += 1
+            else:
+                right.append(pools[i])
+                h_r += heights[i]
+        score = (
+            max(h_l, h_r),
+            abs(h_l - h_r),
+            0 if (mask & (1 << tallest)) else 1,
+            n_left,
         )
-    )
-    return rows
+        if best_score is None or score < best_score:
+            best_score = score
+            best_left = left
+            best_right = right
+
+    return best_left, best_right
 
 
 def _normalize_title(title: Image.Image) -> Image.Image:
@@ -423,16 +408,18 @@ async def draw_card(uid: str, ev: Event) -> Union[str, bytes]:
                     current_data["level"] = get_level_from_list(current_data["avg"], [53, 60, 68, 73, 75])
 
     pool_names = list(total_data.keys())
-    rows = _pair_pools(pool_names, total_data)
-    rows_h = 0
-    for left, right in rows:
-        lh = _pool_block_height(len(total_data[left]["rank_s_list"]))
-        rh = _pool_block_height(len(total_data[right]["rank_s_list"])) if right else 0
-        rows_h += max(lh, rh)
+    pool_heights = [_pool_block_height(len(total_data[n]["rank_s_list"])) for n in pool_names]
+    height_map: Dict[str, int] = dict(zip(pool_names, pool_heights))
+    left_pools, right_pools = _pack_two_columns(pool_names, pool_heights)
+    col_h = max(
+        sum(height_map[n] for n in left_pools),
+        sum(height_map[n] for n in right_pools),
+        0,
+    )
 
     footer = _gacha_footer_img()
     footer_pad = CONTENT_FOOTER_GAP + footer.size[1] + FOOTER_BOTTOM
-    w, h = CARD_W, POOL_START_Y + rows_h + footer_pad
+    w, h = CARD_W, POOL_START_Y + col_h + footer_pad
 
     # 绘制骨架
     card_img = get_zzz_bg(w, h)
@@ -449,34 +436,25 @@ async def draw_card(uid: str, ev: Event) -> Union[str, bytes]:
     up_icon = Image.open(TEXT_PATH / "up.png")
     item_mask = Image.open(TEXT_PATH / "char_bg_and_mask.png")
 
-    cur_y = POOL_START_Y
-    for left, right in rows:
-        await _draw_pool_block(
-            card_img,
-            card_draw,
-            left,
-            total_data[left],
-            LEFT_X,
-            cur_y,
-            item_mask,
-            item_fg,
-            up_icon,
-        )
-        if right:
+    columns: List[Tuple[List[str], int]] = [(left_pools, LEFT_X)]
+    if right_pools:
+        columns.append((right_pools, RIGHT_X))
+
+    for col_pools, col_x in columns:
+        cur_y = POOL_START_Y
+        for gacha_name in col_pools:
             await _draw_pool_block(
                 card_img,
                 card_draw,
-                right,
-                total_data[right],
-                RIGHT_X,
+                gacha_name,
+                total_data[gacha_name],
+                col_x,
                 cur_y,
                 item_mask,
                 item_fg,
                 up_icon,
             )
-        lh = _pool_block_height(len(total_data[left]["rank_s_list"]))
-        rh = _pool_block_height(len(total_data[right]["rank_s_list"])) if right else 0
-        cur_y += max(lh, rh)
+            cur_y += height_map[gacha_name]
 
     card_img = _add_gacha_footer(card_img, footer)
     card_img = await convert_img(card_img)

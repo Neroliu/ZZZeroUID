@@ -65,7 +65,7 @@ def download_weapon():
         weapon = weapon_data[weapon_id]
         weapon_code_name = weapon["code_name"]
 
-        URL = f"{BASE_URL}/{weapon_code_name}.webp"
+        URL = f"{BASE_URL}/{weapon_code_name}Big.webp"
         path = INTEND_PATH / "weapon" / f"{weapon_code_name}_High.png"
         if path.exists():
             print(f"{weapon_code_name}已存在，跳过！")
